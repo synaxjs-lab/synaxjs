@@ -1,0 +1,66 @@
+workflows:
+  synax-android-debug:
+    name: SYNAX Android Debug APK
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    working_directory: Android-App
+    environment:
+      java: 17
+
+    scripts:
+      - name: Validate Android project
+        script: |
+          set -eu
+          test -f settings.gradle.kts || { echo "ERROR: Android-App/settings.gradle.kts is missing."; exit 1; }
+          test -f app/build.gradle.kts || { echo "ERROR: Android-App/app/build.gradle.kts is missing."; exit 1; }
+          test -f app/src/main/AndroidManifest.xml || { echo "ERROR: Android manifest is missing."; exit 1; }
+          echo "Android project structure looks correct."
+
+      - name: Configure Android SDK
+        script: |
+          set -eu
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/Android-App/local.properties"
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          set -o pipefail
+          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0" 2>&1 | tee "$CM_BUILD_DIR/sdk-install.log"
+
+      - name: Download Gradle 8.9
+        script: |
+          set -euo pipefail
+          DIST="$CM_BUILD_DIR/.gradle-dist"
+          GRADLE="$DIST/gradle-8.9/bin/gradle"
+          if [ ! -x "$GRADLE" ]; then
+            mkdir -p "$DIST"
+            curl -fL --retry 3 --retry-delay 2 \
+              "https://services.gradle.org/distributions/gradle-8.9-bin.zip" \
+              -o "$CM_BUILD_DIR/gradle-8.9-bin.zip"
+            unzip -q -o "$CM_BUILD_DIR/gradle-8.9-bin.zip" -d "$DIST"
+          fi
+          "$GRADLE" --version
+
+      - name: Build debug APK
+        script: |
+          set -eu
+          GRADLE="$CM_BUILD_DIR/.gradle-dist/gradle-8.9/bin/gradle"
+          if ! "$GRADLE" --no-daemon --stacktrace :app:assembleDebug > "$CM_BUILD_DIR/gradle-build.log" 2>&1; then
+            cat "$CM_BUILD_DIR/gradle-build.log"
+            exit 1
+          fi
+          cat "$CM_BUILD_DIR/gradle-build.log"
+
+      - name: Verify and name APK
+        script: |
+          set -eu
+          APK="$CM_BUILD_DIR/Android-App/app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -s "$APK" ]; then
+            echo "ERROR: APK was not generated at $APK"
+            exit 1
+          fi
+          mkdir -p "$CM_BUILD_DIR/dist"
+          cp "$APK" "$CM_BUILD_DIR/dist/synax.apk"
+          ls -lh "$CM_BUILD_DIR/dist/synax.apk"
+
+    artifacts:
+      - dist/synax.apk
+      - gradle-build.log
+      - sdk-install.log
