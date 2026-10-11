@@ -1,3 +1,4 @@
+
 name: Build SYNAX APK
 
 on:
@@ -24,6 +25,7 @@ jobs:
     name: Compile Android app
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -32,9 +34,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -f Android-App/settings.gradle.kts || { echo "ERROR: Android-App/settings.gradle.kts is missing. Upload the contents of the build package to the repository root, not inside another nested folder."; exit 1; }
-          test -f Android-App/app/build.gradle.kts || { echo "ERROR: Android-App/app/build.gradle.kts is missing."; exit 1; }
-          test -f Android-App/app/src/main/AndroidManifest.xml || { echo "ERROR: Android manifest is missing."; exit 1; }
+
+          test -f Android-App/settings.gradle.kts || {
+            echo "ERROR: Android-App/settings.gradle.kts is missing."
+            exit 1
+          }
+
+          test -f Android-App/app/build.gradle.kts || {
+            echo "ERROR: Android-App/app/build.gradle.kts is missing."
+            exit 1
+          }
+
+          test -f Android-App/app/src/main/AndroidManifest.xml || {
+            echo "ERROR: Android manifest is missing."
+            exit 1
+          }
+
           echo "Repository layout looks correct."
 
       - name: Set up JDK 17
@@ -43,15 +58,29 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      # FIX: v4 avoids installing the removed SDK "tools" package.
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
 
       - name: Accept Android SDK licenses
         shell: bash
-        run: yes | sdkmanager --licenses || true
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses || {
+            echo "SDK license acceptance failed."
+            exit 1
+          }
 
       - name: Install Android SDK packages
-        run: sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+        shell: bash
+        run: |
+          set -o pipefail
+          sdkmanager --install \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            2>&1 | tee sdk-install.log
 
       - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
@@ -59,6 +88,7 @@ jobs:
           gradle-version: "8.9"
 
       - name: Show build tool versions
+        shell: bash
         run: |
           java -version
           gradle --version
@@ -69,14 +99,21 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          gradle --no-daemon --stacktrace --info :app:assembleDebug 2>&1 | tee ../gradle-build.log
+          gradle --no-daemon --stacktrace --info \
+            :app:assembleDebug 2>&1 | tee ../gradle-build.log
 
       - name: Verify and name APK
         shell: bash
         run: |
           set -euo pipefail
+
           APK="Android-App/app/build/outputs/apk/debug/app-debug.apk"
-          test -s "$APK" || { echo "ERROR: Gradle finished without creating the expected APK at $APK"; exit 1; }
+
+          if [ ! -s "$APK" ]; then
+            echo "ERROR: APK was not generated at $APK"
+            exit 1
+          fi
+
           cp "$APK" synax.apk
           ls -lh synax.apk
 
@@ -88,11 +125,33 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload Gradle log for debugging
-        if: ${{ failure() && hashFiles('gradle-build.log') != '' }}
+      - name: Capture diagnostics after failure
+        if: ${{ failure() }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          {
+            echo "=== Java ==="
+            java -version 2>&1 || true
+
+            echo "=== Android environment ==="
+            env | grep -E '^(ANDROID|JAVA_HOME|GRADLE)' || true
+
+            echo "=== SDK manager location ==="
+            command -v sdkmanager || true
+
+            echo "=== Installed SDK packages ==="
+            sdkmanager --list_installed 2>&1 || true
+          } | tee sdk-diagnostics.log
+
+      - name: Upload build logs for debugging
+        if: ${{ always() && (hashFiles('gradle-build.log') != '' || hashFiles('sdk-install.log') != '' || hashFiles('sdk-diagnostics.log') != '') }}
         uses: actions/upload-artifact@v4
         with:
-          name: synax-gradle-build-log
-          path: gradle-build.log
+          name: synax-build-debug-logs
+          path: |
+            gradle-build.log
+            sdk-install.log
+            sdk-diagnostics.log
           if-no-files-found: warn
           retention-days: 7
