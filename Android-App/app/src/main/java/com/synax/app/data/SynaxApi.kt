@@ -1,4 +1,4 @@
-package com.synax.app.data
+package com.synax.app.data  import com.synax.app.BuildConfig import android.content.ContentResolver import android.content.Context import android.database.Cursor import android.net.Uri import android.provider.OpenableColumns
 
 import android.content.ContentResolver
 import android.content.Context
