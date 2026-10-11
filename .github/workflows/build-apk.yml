@@ -58,26 +58,20 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      # FIX: v4 avoids installing the removed SDK "tools" package.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
           packages: platform-tools
-
-      - name: Accept Android SDK licenses
-        shell: bash
-        run: |
-          set -euo pipefail
-          yes | sdkmanager --licenses || {
-            echo "SDK license acceptance failed."
-            exit 1
-          }
+          accept-android-sdk-licenses: "yes"
 
       - name: Install Android SDK packages
         shell: bash
         run: |
+          set -euo pipefail
           set -o pipefail
+
           sdkmanager --install \
+            "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0" \
             2>&1 | tee sdk-install.log
